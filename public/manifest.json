@@ -1,0 +1,9 @@
+{
+  "name": "الديوان العسكري",
+  "short_name": "الديوان",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#243318",
+  "theme_color": "#243318",
+  "icons": []
+}

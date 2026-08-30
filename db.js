@@ -78,6 +78,12 @@ function cleanupHistory(keepPerKey = 50) {
 // يعيد الصفحات المحذوفة فعلياً لنظام التشغيل (تقليص حجم الملف على القرص).
 // يُستخدم auto_vacuum=INCREMENTAL بدل VACUUM الكامل لأنه لا يحتاج مساحة مؤقتة
 // تعادل حجم قاعدة البيانات كاملة (مهم عندما تكون المساحة محدودة أصلاً).
+// يفرّغ ملف WAL المؤقت (five66.db-wal) بدمجه بالقاعدة الرئيسية وتصغيره —
+// عادة هذا الملف هو المتضخم الفعلي بسبب synchronous=FULL + كتابة متكررة.
+function checkpoint() {
+  return db.pragma('wal_checkpoint(TRUNCATE)');
+}
+
 function reclaimSpace(pages = 1000) {
   db.pragma(`incremental_vacuum(${pages})`);
 }
@@ -134,4 +140,4 @@ function history(key, limit) {
   return getHistoryStmt.all(key, limit || 20);
 }
 
-module.exports = { acceptPush, readAll, readAllWithRevision, stats, history, cleanupHistory, reclaimSpace, DB_FILE, DATA_DIR };
+module.exports = { acceptPush, readAll, readAllWithRevision, stats, history, cleanupHistory, reclaimSpace, checkpoint, DB_FILE, DATA_DIR };

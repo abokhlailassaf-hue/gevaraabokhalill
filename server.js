@@ -134,6 +134,23 @@ app.get('/api/backup', (req, res) => {
   res.json(db.readAll());
 });
 
+// ----- تنظيف طارئ يدوي (يُستدعى من المتصفح مباشرة عند امتلاء القرص) -----
+// يحذف نسخ history الزائدة، يفرّغ ملف WAL المؤقت (checkpoint)، ثم يعيد
+// الصفحات المحذوفة فعلياً للقرص (incremental_vacuum). محمي بنفس Basic Auth.
+app.get('/api/admin/cleanup', (req, res) => {
+  try {
+    const keepPerKey = Number.parseInt(req.query.keep || '20', 10);
+    const before = db.stats();
+    const { deleted } = db.cleanupHistory(keepPerKey);
+    db.checkpoint();
+    db.reclaimSpace(5000);
+    const after = db.stats();
+    res.json({ ok: true, deletedHistoryRows: deleted, before, after });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 // ===================== تحميل الملفات (حل مشكلة Android WebView) =====================
 const _tempFiles = new Map();
 const MAX_TEMP_FILES = 200;
@@ -220,6 +237,24 @@ const heartbeatInterval = setInterval(() => {
 }, 30000);
 
 server.on('close', () => clearInterval(heartbeatInterval));
+
+// ----- تنظيف دوري لسجل history (يمنع امتلاء القرص الدائم مستقبلاً) -----
+// يحتفظ بآخر 50 نسخة لكل مفتاح فقط (قابل للتعديل عبر HISTORY_KEEP_PER_KEY)،
+// ثم يعيد الصفحات المحذوفة فعلياً لنظام التشغيل عبر incremental_vacuum.
+// لا يمس هذا جدول records (الحالة الحالية) إطلاقاً — فقط يقلّص سجل النسخ القديمة.
+const HISTORY_KEEP_PER_KEY = Number.parseInt(process.env.HISTORY_KEEP_PER_KEY || '50', 10);
+function runHistoryCleanup() {
+  try {
+    const { deleted } = db.cleanupHistory(HISTORY_KEEP_PER_KEY);
+    db.reclaimSpace(2000);
+    if (deleted) console.log(`🧹 تنظيف history: حُذفت ${deleted} نسخة قديمة`);
+  } catch (e) {
+    console.error('❌ فشل تنظيف history:', e.message);
+  }
+}
+runHistoryCleanup(); // تنظيف فوري عند الإقلاع
+const historyCleanupInterval = setInterval(runHistoryCleanup, 6 * 60 * 60 * 1000); // كل 6 ساعات
+server.on('close', () => clearInterval(historyCleanupInterval));
 
 // ----- منع تعطّل السيرفر بالكامل عند انقطاع اتصال العميل فجأة -----
 // عندما يغلق العميل (خصوصاً WebView على أندرويد أو شبكة موبايل ضعيفة) الاتصال

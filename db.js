@@ -18,6 +18,7 @@ const DB_FILE = path.join(DATA_DIR, 'five66.db');
 const db = new Database(DB_FILE);
 db.pragma('journal_mode = WAL');
 db.pragma('synchronous = FULL'); // أولوية للحفظ الدائم على السرعة القصوى
+db.pragma('auto_vacuum = INCREMENTAL'); // يفعّل الحلقة فقط على القواعد الجديدة؛ القاعدة الحالية تحتاج VACUUM يدوي مرة واحدة لتفعيله فعلياً (راجع ملاحظات التنظيف)
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS records (
@@ -55,6 +56,31 @@ const countHistoryStmt = db.prepare('SELECT COUNT(*) c FROM history');
 const getHistoryStmt = db.prepare(
   'SELECT revision, payload, updated_at, updated_by FROM history WHERE key = ? ORDER BY revision DESC LIMIT ?'
 );
+
+// يحذف نسخ history الزائدة عن الحد لكل مفتاح، مع إبقاء الأحدث دائماً.
+// هذا لا يمس جدول records (الحالة الحالية) إطلاقاً — فقط يقلّص سجل النسخ القديمة.
+const deleteOldHistoryStmt = db.prepare(`
+  DELETE FROM history
+  WHERE id IN (
+    SELECT id FROM (
+      SELECT id, ROW_NUMBER() OVER (PARTITION BY key ORDER BY revision DESC) AS rn
+      FROM history
+    )
+    WHERE rn > ?
+  )
+`);
+
+function cleanupHistory(keepPerKey = 50) {
+  const info = deleteOldHistoryStmt.run(keepPerKey);
+  return { deleted: info.changes };
+}
+
+// يعيد الصفحات المحذوفة فعلياً لنظام التشغيل (تقليص حجم الملف على القرص).
+// يُستخدم auto_vacuum=INCREMENTAL بدل VACUUM الكامل لأنه لا يحتاج مساحة مؤقتة
+// تعادل حجم قاعدة البيانات كاملة (مهم عندما تكون المساحة محدودة أصلاً).
+function reclaimSpace(pages = 1000) {
+  db.pragma(`incremental_vacuum(${pages})`);
+}
 
 const MAX_ITEM_BYTES = 20 * 1024 * 1024; // حد أقصى معقول لحجم أي مفتاح واحد (يحتوي غالباً مصفوفة JSON)
 
@@ -108,4 +134,4 @@ function history(key, limit) {
   return getHistoryStmt.all(key, limit || 20);
 }
 
-module.exports = { acceptPush, readAll, readAllWithRevision, stats, history, DB_FILE, DATA_DIR };
+module.exports = { acceptPush, readAll, readAllWithRevision, stats, history, cleanupHistory, reclaimSpace, DB_FILE, DATA_DIR };

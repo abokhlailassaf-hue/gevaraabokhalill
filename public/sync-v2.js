@@ -115,6 +115,27 @@
       .finally(function () { _rehydrating = false; });
   }
 
+  // ===== خطة بديلة عبر REST =====
+  // تُستخدم في حالتين: (أ) عند فتح/تحديث الصفحة، لجلب آخر حالة فوراً بغض النظر
+  // عن نجاح اتصال WebSocket من عدمه. (ب) كشبكة أمان دورية طالما WebSocket غير
+  // متصل فعلياً (مثلاً بسبب VPN يحجب wss:// أو متصفح لا يمرر Basic Auth مع
+  // اتصال WebSocket) — بمجرد أن يتصل WebSocket بنجاح تتوقف هذه الشبكة تلقائياً
+  // فلا يوجد استطلاع دوري إضافي أثناء التشغيل الطبيعي.
+  var FALLBACK_POLL_MS = 4000;
+
+  function bootstrapPull() {
+    return fetch('/api/sync/state')
+      .then(function (r) { return r.json(); })
+      .then(function (state) {
+        var changed = false;
+        for (var key in state) {
+          if (applyIncoming(key, state[key].revision, state[key].payload)) changed = true;
+        }
+        if (changed) rehydrateAndRender();
+      })
+      .catch(function () {});
+  }
+
   function connect() {
     try {
       socket = new WebSocket(WS_URL);
@@ -166,6 +187,8 @@
   };
 
   connect();
+  bootstrapPull(); // جلب فوري عند تحميل الصفحة، بغض النظر عن حالة WebSocket
+  setInterval(function () { if (!connected) bootstrapPull(); }, FALLBACK_POLL_MS);
 
   // ضمان محاولة رفع أخيرة عند إغلاق/مغادرة الصفحة (يتوافق مع خطافات index.html الموجودة أصلاً)
   window.addEventListener('beforeunload', function () {

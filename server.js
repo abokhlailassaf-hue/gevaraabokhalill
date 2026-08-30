@@ -128,11 +128,6 @@ app.get('/api/sync-status', (req, res) => {
   res.json({ backend: 'sqlite', persistentDiskConfigured: Boolean(process.env.DATA_DIR), connectedClients: wss.clients.size, ...db.stats() });
 });
 
-// نسخة الحالة مع أرقام المراجعات عبر REST — تُستخدم من sync-v2.js كخطة بديلة
-// عند فشل اتصال WebSocket (مثلاً بسبب VPN أو عدم تمرير Basic Auth مع الاتصال)،
-// حتى لا تبقى الصفحة عالقة على بيانات قديمة بدون أي وسيلة لتحديثها.
-app.get('/api/sync/state', (req, res) => res.json(db.readAllWithRevision()));
-
 // نسخة احتياطية يدوية كاملة
 app.get('/api/backup', (req, res) => {
   res.setHeader('Content-Disposition', 'attachment; filename="diwan-backup.json"');
@@ -225,6 +220,33 @@ const heartbeatInterval = setInterval(() => {
 }, 30000);
 
 server.on('close', () => clearInterval(heartbeatInterval));
+
+// ----- منع تعطّل السيرفر بالكامل عند انقطاع اتصال العميل فجأة -----
+// عندما يغلق العميل (خصوصاً WebView على أندرويد أو شبكة موبايل ضعيفة) الاتصال
+// أثناء إرسال جسم طلب كبير (رفع صور base64 مثلاً)، يرمي Node خطأ داخلي من
+// IncomingMessage._destroy/abortIncoming لا يصل لأي route handler، فيسقط
+// البروسس كله كـ uncaught exception. هذا يمنع ذلك بالتقاط الخطأ وتجاهله
+// بأمان بدل تعطّل الخادم بالكامل.
+server.on('clientError', (err, socket) => {
+  if (!socket.destroyed) {
+    socket.end('HTTP/1.1 400 Bad Request\r\n\r\n');
+  }
+});
+
+process.on('uncaughtException', (err) => {
+  const msg = String(err && err.message || '');
+  const code = err && err.code;
+  if (code === 'ECONNRESET' || code === 'ECONNABORTED' || /aborted/i.test(msg) || /destroy/i.test(msg)) {
+    console.warn('⚠️  تجاهل خطأ اتصال عميل مقطوع:', code || msg);
+    return; // لا تُسقط السيرفر بسبب انقطاع اتصال عميل
+  }
+  console.error('❌ خطأ غير متوقع (fatal):', err);
+  process.exit(1); // أي خطأ آخر غير معروف، الأسلم إعادة تشغيل نظيفة عبر Railway
+});
+
+process.on('unhandledRejection', (reason) => {
+  console.error('❌ Promise مرفوض بدون معالجة:', reason);
+});
 
 server.listen(PORT, () => {
   console.log(`✅ سيرفر الديوان العسكري يعمل على المنفذ ${PORT}`);

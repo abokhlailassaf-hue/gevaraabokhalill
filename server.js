@@ -128,6 +128,11 @@ app.get('/api/sync-status', (req, res) => {
   res.json({ backend: 'sqlite', persistentDiskConfigured: Boolean(process.env.DATA_DIR), connectedClients: wss.clients.size, ...db.stats() });
 });
 
+// نسخة الحالة مع أرقام المراجعات عبر REST — تُستخدم من sync-v2.js كخطة بديلة
+// عند فشل اتصال WebSocket (مثلاً بسبب VPN أو عدم تمرير Basic Auth مع الاتصال)،
+// حتى لا تبقى الصفحة عالقة على بيانات قديمة بدون أي وسيلة لتحديثها.
+app.get('/api/sync/state', (req, res) => res.json(db.readAllWithRevision()));
+
 // نسخة احتياطية يدوية كاملة
 app.get('/api/backup', (req, res) => {
   res.setHeader('Content-Disposition', 'attachment; filename="diwan-backup.json"');

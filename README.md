@@ -54,6 +54,20 @@ five66-server/
 بدون هذه الخطوة سيعمل كل شيء بشكل طبيعي بين الأجهزة أثناء تشغيل نفس النسخة،
 لكن أي Deploy جديد سيمسح `data/five66.db` وتعود الصفحة لبيانات فارغة/افتراضية.
 
+## ✅ قائمة تحقق سريعة للنشر على Railway
+
+1. ارفع محتوى هذا المجلد إلى مستودع Git (GitHub) واربطه بخدمة جديدة على Railway،
+   أو استخدم `railway up` من سطر الأوامر مباشرة من هذا المجلد.
+2. **Volumes** → أنشئ Volume جديد واربطه بالخدمة على المسار `/data`.
+3. **Variables** أضف:
+   - `DATA_DIR=/data`
+   - `BASIC_AUTH_USER` و`BASIC_AUTH_PASSWORD` (أو `BASIC_AUTH_USERS_JSON`)
+4. لا حاجة لضبط `PORT` — Railway يضبطه تلقائياً والسيرفر يقرأه من `process.env.PORT`.
+5. ملف `railway.json` المرفق يضبط فحص الصحة على `/healthz` (نقطة بدون مصادقة
+   حتى لا يفشل الفحص بسبب Basic Auth) وسياسة إعادة التشغيل عند الفشل.
+6. بعد أول Deploy ناجح، افتح رابط الخدمة — سيطلب المتصفح بيانات الدخول (Basic Auth).
+7. تحقق من `GET /api/sync-status` بعد الدخول للتأكد أن `persistentDiskConfigured: true`.
+
 ## التشغيل محلياً
 
 ```bash
